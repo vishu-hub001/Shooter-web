@@ -2,8 +2,32 @@ const http = require('http'), fs = require('fs'), path = require('path');
 const { WebSocketServer } = require('ws');
 
 const html = () => fs.readFileSync(path.join(__dirname, 'index.html'));
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+// three.js is served from this server (downloaded once from a CDN and cached), so phones don't depend on a CDN
+const THREE_URLS = ['https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js'];
+const THREE_FILE = path.join(__dirname, 'three.min.js');
+let threeJs = null;
+try { threeJs = fs.readFileSync(THREE_FILE); } catch (e) {}
+async function loadThree() {
+  if (threeJs) return threeJs;
+  for (const u of THREE_URLS) {
+    try {
+      const r = await fetch(u); if (!r.ok) continue;
+      const b = Buffer.from(await r.arrayBuffer()); if (b.length < 100000) continue;
+      threeJs = b; try { fs.writeFileSync(THREE_FILE, b); } catch (e) {}
+      return b;
+    } catch (e) { console.log('three.js download failed:', u, e.message); }
+  }
+  return null;
+}
+loadThree().then(b => console.log(b ? 'three.js ready' : 'three.js NOT available (clients will use CDN fallback)'));
+const server = http.createServer(async (req, res) => {
+  if (req.url.split('?')[0] === '/three.min.js') {
+    const b = await loadThree();
+    if (!b) { res.writeHead(502); return res.end('three.js unavailable'); }
+    res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400' });
+    return res.end(b);
+  }
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
   res.end(html());
 });
 const wss = new WebSocketServer({ server });

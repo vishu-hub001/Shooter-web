@@ -300,13 +300,15 @@ canvas{display:block}
 <div class="btn" id="fire">FIRE</div><div class="btn" id="jump">JUMP</div><div class="btn" id="scopeBtn">SCOPE</div><div class="btn" id="crouchBtn">CROUCH</div><div class="btn" id="reloadBtn">RELOAD</div>
 <div id="wp" class="ui"><div class="wph"><div><b id="wpt">Choose your weapon</b><small id="wps">Tap a weapon, then deploy</small></div><button id="wpgo">DEPLOY</button><button id="wpx">✕ Close</button></div><div id="wpg"></div></div>
 <div id="rp" class="ui"><div class="rpbox"><div id="rpt">You died</div><div id="rpk"></div><div id="rpsc"></div><div id="rpcd"><i></i></div><div id="rpl">Pick your next weapon</div><div id="rpw"></div><button id="rpb" disabled>Respawn</button></div></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>window.addEventListener('error',function(e){var m=document.getElementById('menu');if(m){var d=document.getElementById('errbox')||m.appendChild(Object.assign(document.createElement('div'),{id:'errbox'}));d.style.cssText='color:#ff6b6b;font:12px monospace;max-width:90vw;word-break:break-word;margin-top:8px';d.textContent='Error: '+(e.message||'')+' (line '+(e.lineno||'?')+')'}})</script>
+<script src="/three.min.js"></script>
+<script>window.THREE||document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script><script>window.THREE||document.write(\'<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\\/script>\')<\/script>')</script>
 <script>
 const $=id=>document.getElementById(id);
 const ST=Object.assign({sens:1,ads:1,inv:0,fov:75,res:1.5,vib:1,shake:1,dn:1,vol:.7,fps:0,xc:'#ffffff',xs:1,shad:1},(()=>{try{return JSON.parse(localStorage.getItem('st')||'{}')}catch(e){return{}}})());
 const saveST=()=>{try{localStorage.setItem('st',JSON.stringify(ST))}catch(e){}};
 try{const _v=navigator.vibrate?navigator.vibrate.bind(navigator):null;Object.defineProperty(navigator,'vibrate',{value:(...a)=>ST.vib&&_v?_v(...a):false,configurable:true})}catch(e){}
-$('name').value=localStorage.getItem('n')||'';$('room').value=localStorage.getItem('r')||'main';
+try{$('name').value=localStorage.getItem('n')||'';$('room').value=localStorage.getItem('r')||'main'}catch(e){$('room').value='main'}
 let ws=null,myId=0,hp=100,dead=false,started=false,practice=false;
 const others=new Map(),stats=new Map();
 const BUFF_MS=40000,PU_RESPAWN=15000,KINDS=['big','health','speed','small','jump'],myB={};let hpMax=100,stepSm=0,onG=true;
@@ -1289,7 +1291,7 @@ $('cExit').onclick=()=>{const b=$('cExit');if(b.dataset.s){try{ws&&ws.close()}ca
 $('cfgMenu').onclick=openCfg;$('cfgx').onclick=$('cfgd').onclick=closeCfg;
 addEventListener('resize',()=>{applyLay();if(editing)syncGhosts()});applyLay();
 // ----- match timer + end screen
-let matchDur=+localStorage.getItem('dur')||180,endAt=0,matchOver=false,tmTxt='';
+let matchDur=(()=>{try{return+localStorage.getItem('dur')||180}catch(e){return 180}})(),endAt=0,matchOver=false,tmTxt='';
 if(![30,180,300].includes(matchDur))matchDur=180;
 [...$('dur').children].forEach(c=>{c.classList.toggle('on',+c.dataset.v===matchDur);c.onclick=()=>{matchDur=+c.dataset.v;try{localStorage.setItem('dur',matchDur)}catch(e){}[...$('dur').children].forEach(x=>x.classList.toggle('on',x===c))}});
 function startTimer(ms){endAt=performance.now()+(ms>0?ms:matchDur*1000);$('timer').style.display='block'}
@@ -1441,6 +1443,6 @@ function loop(now){requestAnimationFrame(loop);fpsN++;if(now-fpsT>500){if(ST.fps
 requestAnimationFrame(loop);
 function beginGame(){const on=$('shad').checked;ren.shadowMap.enabled=on;sun.castShadow=on;started=true;resetAmmo();
  if($('bots').checked){startTimer(matchDur*1000);startPractice(+$('botn').value)}else connect()}
-$('play').onclick=()=>{localStorage.setItem('n',$('name').value);localStorage.setItem('r',$('room').value);$('menu').style.display='none';
+$('play').onclick=()=>{try{localStorage.setItem('n',$('name').value);localStorage.setItem('r',$('room').value)}catch(e){}$('menu').style.display='none';
  document.documentElement.requestFullscreen?.().catch(()=>{});screen.orientation?.lock?.('landscape').catch(()=>{});openWP('deploy')};
 </script></body></html>
