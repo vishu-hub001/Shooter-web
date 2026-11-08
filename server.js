@@ -31,13 +31,13 @@ wss.on('connection', ws => {
     else if (d.t === 'pos') {
       if (p.hp <= 0) return;
       p.x = d.x; p.y = d.y; p.z = d.z; p.ry = d.ry;
-      room(p.room, { t: 'pos', id: p.id, x: d.x, y: d.y, z: d.z, ry: d.ry }, p);
+      room(p.room, { t: 'pos', id: p.id, x: d.x, y: d.y, z: d.z, ry: d.ry, s: d.s | 0 }, p);
     } else if (d.t === 'shoot') {
       room(p.room, { t: 'shoot', id: p.id, from: d.from, to: d.to }, p);
     } else if (d.t === 'hit') {
       const v = players.get(d.id);
       if (!v || v.room !== p.room || v.hp <= 0 || p.hp <= 0) return;
-      v.hp -= 25;
+      v.hp -= Math.min(200, Math.max(1, +d.dmg || 25));
       if (v.hp > 0) return send(v.ws, { t: 'hp', hp: v.hp });
       v.hp = 0; v.d++; p.k++;
       const msg = { t: 'kill', killer: p.id, victim: v.id, kn: p.name, vn: v.name, k: p.k, d: v.d };
