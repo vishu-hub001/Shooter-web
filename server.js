@@ -33,7 +33,7 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocketServer({ server });
 const players = new Map();
 let nextId = 1;
-const WEAPONS = 12; // 8 = Duel Gun, 9 = Shield, 10 = Katana, 11 = Spider Web
+const WEAPONS = 17; // 8 = Duel Gun, 9 = Shield, 10 = Katana, 11 = Spider Web, 12 = Pie Gun, 13 = Boxing Glove, 14 = Rubber Chicken, 15 = BONK Mallet, 16 = Plunger Gun
 const rooms = new Map(); // room name -> { dur, endAt, timer, pu, puT }
 const DURS = [30, 180, 300]; // seconds, picked by whoever creates the room
 
@@ -107,7 +107,8 @@ const GAMES = { ttt: { players: 2 }, race: { players: 2 }, boat: { players: 2 },
 const HOOP_MS = 40000, FLAP_MS = 90000, PONG_MS = 90000, PONG_WIN = 3, PEN_PICK = 7000, PEN_ANIM = 3000;
 const GO_MS = 3000, RACE_MS = 90000, LAP_N = 200, MIN_LAP_MS = 8000; // 2D races: 3 s countdown, one lap, 90 s cap (LAP_N must match index.html)
 // ---- exclusive weapons: only a duel winner gets one, for XW_MS, lost on death
-const SHLD = 9, KAT = 10, WEBW = 11, XWS = [SHLD, KAT, WEBW], XW_MS = 40000;
+const SHLD = 9, KAT = 10, WEBW = 11, PIE = 12, XWS = [SHLD, KAT, WEBW], XW_MS = 40000;
+const GLV = 13, PLG = 16, FUNCAP = { 13: 80, 14: 44, 15: 120, 16: 24 }; // funny weapons: max damage per hit (head shots count double on the client)
 const STUCK_MS = 7000, SUF_DMG = 6, SUF_TICK = 400; // web: 6 hp every 0.4 s = 15 hp/s, a full 100 hp bar lasts ~6.7 s
 function dropXW(p) {
   if (!p.xw) return;
@@ -370,10 +371,14 @@ wss.on('connection', ws => {
       room(p.room, { t: 'pos', id: p.id, x: d.x, y: d.y, z: d.z, ry: d.ry, s: d.s | 0 }, p);
     } else if (d.t === 'shoot') {
       room(p.room, { t: 'shoot', id: p.id, from: d.from, to: d.to }, p);
+    } else if (d.t === 'swing') { // boxing glove / rubber chicken / mallet: relay the effect to the room
+      const ok = a => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite), k = d.k | 0;
+      if (p.hp <= 0 || p.duel || ![13, 14, 15].includes(k) || !ok(d.from) || !ok(d.to)) return;
+      room(p.room, { t: 'swing', id: p.id, k, from: d.from, to: d.to, h: d.h | 0 }, p);
     } else if (d.t === 'arrow') {
       const ok = a => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite);
       if (p.hp <= 0 || !ok(d.from) || !ok(d.v)) return;
-      let k = [5, 6, 7, SHLD, WEBW].includes(d.k | 0) ? d.k | 0 : 6; // spear, bow, slipper, shield, web
+      let k = [5, 6, 7, SHLD, WEBW, PIE, PLG].includes(d.k | 0) ? d.k | 0 : 6; // spear, bow, slipper, shield, web, pie
       if ((k === SHLD || k === WEBW) && (!p.xw || p.xw.w !== k)) return; // exclusive weapons need the prize
       room(p.room, { t: 'arrow', id: p.id, from: d.from, v: d.v, k }, p);
     } else if (d.t === 'duel') {
@@ -411,12 +416,21 @@ wss.on('connection', ws => {
       if (XWS.includes(wi) && (!p.xw || p.xw.w !== wi)) return; // can't fake an exclusive weapon
       if (wi === WEBW) return; // webs do their damage through suffocation, see 'web'
       let dmg = Math.min(200, Math.max(1, +d.dmg || 25));
-      if (guarded(v, p)) { // shield up and facing the shooter: 95% of the damage is absorbed
+      if (wi === PIE) dmg = Math.min(dmg, 8); // a pie only splats
+      if (FUNCAP[wi]) dmg = Math.min(dmg, FUNCAP[wi]);
+      const gd = guarded(v, p);
+      if (gd) { // shield up and facing the shooter: 95% of the damage is absorbed
         send(v.ws, { t: 'blocked', me: 'v' }); send(p.ws, { t: 'blocked', me: 'a' });
         dmg *= 0.05;
       } else if (wi === KAT || wi === SHLD) dmg = 9999; // katana and thrown shield: one hit kills, even a giant
       else if (v.bf.big) dmg *= 0.6; // giants take 40% less damage
       v.hp -= dmg;
+      if (wi === PIE && !gd && v.hp > 0) room(p.room, { t: 'pied', id: v.id, ms: 2000 }); // cream in the face for everyone to see
+      if (wi === PLG && !gd && v.hp > 0) room(p.room, { t: 'plunged', id: v.id, ms: 2500 }); // plunger stuck on the face
+      if (wi === GLV && !gd && v.hp > 0) { // boxing glove: launch the victim away from the puncher (giants resist, tiny players fly further)
+        const dx = v.x - p.x, dz = v.z - p.z, l = Math.hypot(dx, dz) || 1, m = (v.bf.big ? 0.6 : v.bf.small ? 1.3 : 1) * 17 / l;
+        send(v.ws, { t: 'kb', vx: dx * m, vz: dz * m, vy: 6.5 });
+      }
       if (v.hp > 0) return send(v.ws, { t: 'hp', hp: v.hp, mx: v.mx });
       killPlayer(p, v, wi);
     } else if (d.t === 'web') {
