@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Phone Shooter</title>
+<style>
+*{box-sizing:border-box;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,sans-serif;touch-action:none}
+canvas{display:block}
+#menu{position:fixed;inset:0;background:#111e;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;color:#fff;z-index:10}
+#menu input,#menu button{font-size:18px;padding:12px;border-radius:10px;border:0;width:240px;text-align:center}
+#menu button{background:#e53935;color:#fff;font-weight:700}
+#hud{position:fixed;top:8px;left:8px;right:8px;color:#fff;font-weight:700;text-shadow:0 1px 3px #000;pointer-events:none;display:flex;justify-content:space-between;font-size:14px}
+#hpbar{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);width:120px;height:10px;background:#0006;border:1px solid #fff8;border-radius:5px;overflow:hidden}
+#hp{height:100%;background:#4caf50;width:100%}
+#cross{position:fixed;left:50%;top:50%;width:14px;height:14px;margin:-7px;border:2px solid #fffa;border-radius:50%;pointer-events:none}
+#feed{position:fixed;top:40px;right:8px;color:#fff;font-size:13px;text-align:right;text-shadow:0 1px 3px #000;pointer-events:none}
+#dead{position:fixed;inset:0;background:#a008;color:#fff;display:none;align-items:center;justify-content:center;font-size:32px;font-weight:800;pointer-events:none}
+#stickBase{position:fixed;left:24px;bottom:24px;width:120px;height:120px;border-radius:50%;background:#fff3;border:2px solid #fff6}
+#stick{position:absolute;left:40px;top:40px;width:40px;height:40px;border-radius:50%;background:#fffa}
+.btn{position:fixed;border-radius:50%;background:#e53935cc;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;border:2px solid #fff8}
+#fire{right:24px;bottom:30px;width:84px;height:84px}
+#jump{right:120px;bottom:30px;width:56px;height:56px;background:#1e88e5cc}
+</style></head><body>
+<div id="menu">
+  <h1>🔫 Phone Shooter</h1>
+  <input id="name" placeholder="Your name" maxlength="12">
+  <input id="room" placeholder="Room code (same as friends)" maxlength="20" value="main">
+  <button id="play">PLAY</button>
+  <small>Left stick: move · Drag right side: aim<br>Red button: shoot</small>
+</div>
+<div id="hud"><span id="me"></span><span id="board"></span></div>
+<div id="feed"></div><div id="cross"></div><div id="hpbar"><div id="hp"></div></div>
+<div id="dead">YOU DIED</div>
+<div id="stickBase"><div id="stick"></div></div>
+<div class="btn" id="fire">FIRE</div><div class="btn" id="jump">JUMP</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+$('name').value=localStorage.getItem('n')||'';
+let ws,myId,hp=100,dead=false,started=false;
+const others=new Map(), stats=new Map();
+// scene
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x87ceeb);scene.fog=new THREE.Fog(0x87ceeb,30,110);
+const cam=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,200);cam.rotation.order='YXZ';
+const ren=new THREE.WebGLRenderer({antialias:false});ren.setPixelRatio(Math.min(devicePixelRatio,2));ren.setSize(innerWidth,innerHeight);document.body.prepend(ren.domElement);
+addEventListener('resize',()=>{ren.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()});
+scene.add(new THREE.HemisphereLight(0xffffff,0x556655,0.9));
+const sun=new THREE.DirectionalLight(0xffffff,0.6);sun.position.set(30,50,20);scene.add(sun);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshLambertMaterial({color:0x5a8f4a}));ground.rotation.x=-Math.PI/2;scene.add(ground);
+const solids=[ground],boxes=[];
+function addBox(x,z,w,d,h,c){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color:c}));m.position.set(x,h/2,z);scene.add(m);solids.push(m);boxes.push({x,z,w,d,h})}
+// arena: walls + deterministic cover
+const R=40;addBox(0,-R,2*R,2,6,0x666666);addBox(0,R,2*R,2,6,0x666666);addBox(-R,0,2,2*R,6,0x666666);addBox(R,0,2,2*R,6,0x666666);
+let s=7;const rnd=()=>(s=(s*16807)%2147483647)/2147483647;
+for(let i=0;i<28;i++){const w=2+rnd()*5,d=2+rnd()*5;let x=(rnd()-.5)*70,z=(rnd()-.5)*70;if(Math.hypot(x,z)<5)x+=10;addBox(x,z,w,d,2.5+rnd()*2.5,new THREE.Color().setHSL(rnd(),.3,.5).getHex())}
+// gun
+const gun=new THREE.Mesh(new THREE.BoxGeometry(.12,.14,.6),new THREE.MeshLambertMaterial({color:0x222222}));gun.position.set(.25,-.22,-.5);cam.add(gun);scene.add(cam);
+const flash=new THREE.PointLight(0xffaa33,0,6);flash.position.set(.25,-.15,-.9);cam.add(flash);
+// players
+function mkPlayer(id){const g=new THREE.Group();const c=new THREE.Color().setHSL((id*0.37)%1,.8,.5);
+ const body=new THREE.Mesh(new THREE.BoxGeometry(.7,1.1,.4),new THREE.MeshLambertMaterial({color:c}));body.position.y=.95;
+ const head=new THREE.Mesh(new THREE.SphereGeometry(.25,10,8),new THREE.MeshLambertMaterial({color:0xffcc99}));head.position.y=1.75;
+ const legs=new THREE.Mesh(new THREE.BoxGeometry(.5,.4,.3),new THREE.MeshLambertMaterial({color:0x333333}));legs.position.y=.2;
+ [body,head,legs].forEach(m=>m.userData.pid=id);g.add(body,head,legs);scene.add(g);return g}
+function addOther(p){if(p.id===myId||others.has(p.id))return;const g=mkPlayer(p.id);g.position.set(p.x,p.y,p.z);others.set(p.id,{g,tx:p.x,ty:p.y,tz:p.z,try:p.ry,name:p.name,alive:p.hp>0});g.visible=p.hp>0;stats.set(p.id,{n:p.name,k:p.k||0,d:p.d||0})}
+// state
+const P={x:0,y:0,z:0,vy:0,yaw:0,pitch:0};
+const R_=.45;
+function collide(){for(const b of boxes){if(P.y>=b.h-.1)continue;const hx=b.w/2+R_,hz=b.d/2+R_,dx=P.x-b.x,dz=P.z-b.z;
+ if(Math.abs(dx)<hx&&Math.abs(dz)<hz){const px=hx-Math.abs(dx),pz=hz-Math.abs(dz);if(px<pz)P.x+=px*Math.sign(dx||1);else P.z+=pz*Math.sign(dz||1)}}}
+// input
+let mv={x:0,y:0},stickId=null,lookId=null,lastL={x:0,y:0},firing=false,wantJump=false;
+const base=$('stickBase'),st=$('stick');
+document.addEventListener('touchstart',e=>{for(const t of e.changedTouches){
+ const tg=t.target;
+ if(tg.closest('#stickBase')&&stickId===null){stickId=t.identifier;moveStick(t)}
+ else if(tg.id==='fire'){firing=true}
+ else if(tg.id==='jump'){wantJump=true}
+ else if(t.clientX>innerWidth*.35&&lookId===null&&!tg.closest('#menu')){lookId=t.identifier;lastL={x:t.clientX,y:t.clientY}}}
+ if(!e.target.closest('#menu'))e.preventDefault()},{passive:false});
+document.addEventListener('touchmove',e=>{for(const t of e.changedTouches){
+ if(t.identifier===stickId)moveStick(t);
+ else if(t.identifier===lookId){P.yaw-=(t.clientX-lastL.x)*.006;P.pitch=Math.max(-1.4,Math.min(1.4,P.pitch-(t.clientY-lastL.y)*.006));lastL={x:t.clientX,y:t.clientY}}}
+ e.preventDefault()},{passive:false});
+function endT(e){for(const t of e.changedTouches){
+ if(t.identifier===stickId){stickId=null;mv={x:0,y:0};st.style.left='40px';st.style.top='40px'}
+ if(t.identifier===lookId)lookId=null}
+ if(![...e.touches].some(t=>t.target.id==='fire'))firing=false}
+document.addEventListener('touchend',endT);document.addEventListener('touchcancel',endT);
+function moveStick(t){const r=base.getBoundingClientRect(),cx=r.left+60,cy=r.top+60;let dx=t.clientX-cx,dy=t.clientY-cy;const l=Math.hypot(dx,dy),m=50;if(l>m){dx*=m/l;dy*=m/l}
+ st.style.left=(40+dx)+'px';st.style.top=(40+dy)+'px';mv={x:dx/m,y:dy/m}}
+// desktop fallback
+const keys={};addEventListener('keydown',e=>keys[e.code]=1);addEventListener('keyup',e=>keys[e.code]=0);
+addEventListener('mousedown',e=>{if(started&&e.target.tagName==='CANVAS')firing=true});addEventListener('mouseup',()=>{if(!('ontouchstart' in window))firing=false});
+addEventListener('mousemove',e=>{if(e.buttons&2||document.pointerLockElement){P.yaw-=e.movementX*.003;P.pitch=Math.max(-1.4,Math.min(1.4,P.pitch-e.movementY*.003))}});
+document.addEventListener('click',e=>{if(started&&e.target.tagName==='CANVAS'&&!('ontouchstart' in window))e.target.requestPointerLock?.()});
+// shooting
+const ray=new THREE.Raycaster(),tracers=[];let lastShot=0;
+function tracer(a,b){const g=new THREE.BufferGeometry().setFromPoints([a,b]);const l=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffee88}));scene.add(l);tracers.push({l,t:performance.now()})}
+function shoot(){const now=performance.now();if(now-lastShot<250||dead)return;lastShot=now;
+ ray.setFromCamera({x:0,y:0},cam);ray.far=120;
+ const targets=[...solids];others.forEach(o=>o.alive&&targets.push(o.g));
+ const hit=ray.intersectObjects(targets,true)[0];
+ const from=new THREE.Vector3(P.x,P.y+1.5,P.z),dir=ray.ray.direction,to=hit?hit.point:from.clone().add(dir.clone().multiplyScalar(100));
+ const o=cam.localToWorld(new THREE.Vector3(.25,-.15,-.8));tracer(o,to);
+ flash.intensity=3;setTimeout(()=>flash.intensity=0,50);gun.position.z=-.4;
+ ws.send(JSON.stringify({t:'shoot',from:o.toArray(),to:to.toArray()}));
+ if(hit&&hit.object.userData.pid)ws.send(JSON.stringify({t:'hit',id:hit.object.userData.pid}))}
+// network
+function connect(){ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
+ ws.onopen=()=>ws.send(JSON.stringify({t:'join',name:$('name').value||'Player',room:$('room').value.trim()||'main'}));
+ ws.onclose=()=>{$('menu').style.display='flex';$('menu').querySelector('h1').textContent='Disconnected – retry';started=false};
+ ws.onmessage=ev=>{const d=JSON.parse(ev.data);
+  if(d.t==='init'){myId=d.me.id;P.x=d.me.x;P.z=d.me.z;stats.set(myId,{n:d.me.name,k:0,d:0});d.players.forEach(addOther);refresh()}
+  else if(d.t==='new'){addOther(d.p);refresh()}
+  else if(d.t==='pos'){const o=others.get(d.id);if(o){o.tx=d.x;o.ty=d.y;o.tz=d.z;o.try=d.ry}}
+  else if(d.t==='shoot'){tracer(new THREE.Vector3(...d.from),new THREE.Vector3(...d.to))}
+  else if(d.t==='hp'){hp=d.hp;$('hp').style.width=hp+'%';navigator.vibrate?.(80)}
+  else if(d.t==='kill'){const k=stats.get(d.killer),v=stats.get(d.victim);if(k)k.k=d.k;if(v)v.d=d.d;
+   feed(`${d.kn} 💥 ${d.vn}`);
+   if(d.victim===myId){dead=true;hp=0;$('hp').style.width='0';$('dead').style.display='flex'}
+   else{const o=others.get(d.victim);if(o){o.alive=false;o.g.visible=false}}refresh()}
+  else if(d.t==='respawn'){if(d.id===myId){P.x=d.x;P.z=d.z;P.y=0;hp=100;dead=false;$('hp').style.width='100%';$('dead').style.display='none'}
+   else{const o=others.get(d.id);if(o){o.alive=true;o.g.visible=true;o.g.position.set(d.x,0,d.z);o.tx=d.x;o.tz=d.z}}}
+  else if(d.t==='left'){const o=others.get(d.id);if(o){scene.remove(o.g);others.delete(d.id);stats.delete(d.id);refresh()}}}}
+function feed(t){const e=document.createElement('div');e.textContent=t;$('feed').prepend(e);setTimeout(()=>e.remove(),5000)}
+function refresh(){const a=[...stats.entries()].sort((x,y)=>y[1].k-x[1].k).slice(0,5);
+ $('board').innerHTML=a.map(([id,s])=>`${id===myId?'⭐':''}${s.n}: ${s.k}/${s.d}`).join('<br>');$('me').textContent='Players: '+stats.size}
+// loop
+let last=performance.now(),netT=0;
+function loop(now){requestAnimationFrame(loop);const dt=Math.min(.05,(now-last)/1000);last=now;
+ if(started){
+  if(!dead){let mx=mv.x,mz=mv.y;if(keys.KeyA)mx-=1;if(keys.KeyD)mx+=1;if(keys.KeyW)mz-=1;if(keys.KeyS)mz+=1;
+   const l=Math.hypot(mx,mz);if(l>1){mx/=l;mz/=l}
+   const sp=7,c=Math.cos(P.yaw),sn=Math.sin(P.yaw);
+   P.x+=(mx*c+mz*sn)*sp*dt;P.z+=(-mx*sn+mz*c)*sp*dt;
+   if((wantJump||keys.Space)&&P.y<=0.001){P.vy=7}wantJump=false;
+   P.vy-=20*dt;P.y=Math.max(0,P.y+P.vy*dt);if(P.y===0)P.vy=0;
+   collide();P.x=Math.max(-R+1.5,Math.min(R-1.5,P.x));P.z=Math.max(-R+1.5,Math.min(R-1.5,P.z));
+   if(firing)shoot()}
+  cam.position.set(P.x,P.y+1.6,P.z);cam.rotation.set(P.pitch,P.yaw,0);
+  gun.position.z+=(-.5-gun.position.z)*.3;
+  netT+=dt;if(netT>.05&&ws.readyState===1){netT=0;ws.send(JSON.stringify({t:'pos',x:P.x,y:P.y,z:P.z,ry:P.yaw}))}
+  others.forEach(o=>{o.g.position.x+=(o.tx-o.g.position.x)*.25;o.g.position.y+=(o.ty-o.g.position.y)*.25;o.g.position.z+=(o.tz-o.g.position.z)*.25;o.g.rotation.y=o.try})}
+ for(let i=tracers.length-1;i>=0;i--)if(now-tracers[i].t>80){scene.remove(tracers[i].l);tracers.splice(i,1)}
+ ren.render(scene,cam)}
+requestAnimationFrame(loop);
+$('play').onclick=()=>{localStorage.setItem('n',$('name').value);$('menu').style.display='none';started=true;connect();
+ document.documentElement.requestFullscreen?.().catch(()=>{});screen.orientation?.lock?.('landscape').catch(()=>{})};
+</script></body></html>
