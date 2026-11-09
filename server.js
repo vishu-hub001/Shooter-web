@@ -540,7 +540,7 @@ wss.on('connection', ws => {
       } else if (wi === KAT || wi === SHLD) dmg = 9999; // katana and thrown shield: one hit kills, even a giant
       else if (v.bf.big) dmg *= 0.6; // giants take 40% less damage
       v.hp -= dmg;
-      if (wi === PIE && !gd && v.hp > 0) room(p.room, { t: 'pied', id: v.id, ms: 2000 }); // cream in the face for everyone to see
+      if (wi === PIE && !gd && v.hp > 0) room(p.room, { t: 'pied', id: v.id, ms: 5000 }); // cream in the face for everyone to see
       if (wi === PLG && !gd && v.hp > 0) room(p.room, { t: 'plunged', id: v.id, ms: 2500 }); // plunger stuck on the face
       if (wi === CONF && !gd && v.hp > 0) room(p.room, { t: 'glit', id: v.id, ms: GLIT_MS }); // glitter: everybody sees where the victim is
       if (wi === BALL && !gd && v.hp > 0) room(p.room, { t: 'soak', id: v.id, ms: SOAK_MS }); // soaked: slower + wet footprints
